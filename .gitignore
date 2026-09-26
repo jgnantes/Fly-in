@@ -1,0 +1,8 @@
+*.pdf
+*:Zone.Identifier
+*.venv
+*__pycache__
+*.mypy_cache
+*.pytest_cache
+PLANO_DE_ESTUDOS.md
+maps
