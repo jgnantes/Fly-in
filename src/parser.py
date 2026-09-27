@@ -1,39 +1,166 @@
-from dataclasses import dataclass
+from .models import Zone, Connection, ParsedMap
 import pathlib as pl
 
 
-@dataclass
-class Zone:
-    name: str
-    x: int
-    y: int
-    zone_type: str
-    color: str | None
-    max_drones: int | None
-
-
-@dataclass
-class Connection:
-    first_zone: str
-    second_zone: str
-    max_link_capacity: int
-
-
-@dataclass
-class ParsedMap:
-    nb_drones: int
-    zones: dict[str, Zone]
-    connections: list[Connection]
-    start_hub: str
-    end_hub: str
-
-
 class MapParser:
+
+    @staticmethod
+    def _parse_int(
+        value: str,
+        field: str,
+        line_number: int,
+        positive: bool = False,
+    ) -> int:
+        """Convert text to an integer and optionally require positivity."""
+        value = value.strip()
+        digits = value[1:] if value[:1] in {"+", "-"} else value
+        if not digits or not digits.isascii() or not digits.isdecimal():
+            raise ValueError(
+                f"Line {line_number}: {field} must be an integer"
+            )
+        number = int(value)
+        if positive and number <= 0:
+            raise ValueError(
+                f"Line {line_number}: {field} must be positive"
+            )
+        return number
+
+    @staticmethod
+    def _parse_metadata(
+        value: str,
+        line_number: int,
+    ) -> tuple[str, dict[str, str]]:
+        """Separate a declaration from its metadata."""
+        definition, opening, remainder = value.partition("[")
+
+        if not opening:
+            if "]" in value:
+                raise ValueError(f"Line {line_number}: invalid metadata")
+            return definition.strip(), {}
+        if (
+            not remainder.endswith("]")
+            or "[" in remainder
+            or "]" in remainder[:-1]
+        ):
+            raise ValueError(f"Line {line_number}: invalid metadata")
+
+        metadata: dict[str, str] = {}
+        for item in remainder[:-1].split():
+            key, separator, field_value = item.partition("=")
+            if not separator or not key or not field_value:
+                raise ValueError(
+                    f"Line {line_number}: invalid metadata field '{item}'"
+                )
+            if key in metadata:
+                raise ValueError(
+                    f"Line {line_number}: duplicate metadata key '{key}'"
+                )
+            metadata[key] = field_value
+
+        return definition.strip(), metadata
+
+    @staticmethod
+    def _parse_zone(role: str, value: str, line_number: int) -> Zone:
+        """Convert a zone declaration into a Zone."""
+        if role not in {"start_hub", "end_hub", "hub"}:
+            raise ValueError(f"Line {line_number}: invalid zone role")
+
+        definition, metadata = MapParser._parse_metadata(value, line_number)
+        fields = definition.split()
+        if len(fields) != 3:
+            raise ValueError(
+                f"Line {line_number}: expected a name and two coordinates"
+            )
+
+        name, x_text, y_text = fields
+        if "-" in name:
+            raise ValueError(
+                f"Line {line_number}: zone names cannot contain '-'"
+            )
+
+        allowed_metadata = {"zone", "color", "max_drones"}
+        for key in metadata:
+            if key not in allowed_metadata:
+                raise ValueError(
+                    f"Line {line_number}: unsupported metadata key '{key}'"
+                )
+
+        zone_type = metadata.get("zone", "normal")
+        if zone_type not in {"normal", "blocked", "restricted", "priority"}:
+            raise ValueError(
+                f"Line {line_number}: invalid zone type '{zone_type}'"
+            )
+
+        max_drones = None
+        if role == "hub":
+            max_drones = MapParser._parse_int(
+                metadata.get("max_drones", "1"),
+                "max_drones",
+                line_number,
+                positive=True,
+            )
+
+        return Zone(
+            name=name,
+            x=MapParser._parse_int(x_text, "x", line_number),
+            y=MapParser._parse_int(y_text, "y", line_number),
+            zone_type=zone_type,
+            color=metadata.get("color"),
+            max_drones=max_drones,
+        )
+
+    @staticmethod
+    def _parse_connection(
+        value: str,
+        zones: dict[str, Zone],
+        line_number: int,
+    ) -> Connection:
+        """Convert a connection declaration into a Connection."""
+        definition, metadata = MapParser._parse_metadata(value, line_number)
+        endpoints = definition.split("-")
+
+        if len(endpoints) != 2:
+            raise ValueError(
+                f"Line {line_number}: connection needs two zone names"
+            )
+
+        first_zone, second_zone = endpoints
+        if (
+            not first_zone
+            or not second_zone
+            or any(char.isspace() for char in first_zone + second_zone)
+        ):
+            raise ValueError(
+                f"Line {line_number}: invalid zone name in connection"
+            )
+
+        for name in (first_zone, second_zone):
+            if name not in zones:
+                raise ValueError(
+                    f"Line {line_number}: undefined zone '{name}'"
+                )
+
+        for key in metadata:
+            if key != "max_link_capacity":
+                raise ValueError(
+                    f"Line {line_number}: unsupported metadata key '{key}'"
+                )
+
+        capacity = MapParser._parse_int(
+            metadata.get("max_link_capacity", "1"),
+            "max_link_capacity",
+            line_number,
+            positive=True,
+        )
+
+        return Connection(first_zone, second_zone, capacity)
+
     def parse_file(self, path: pl.Path) -> ParsedMap:
+        """Read a map file and build its parsed representation."""
         nb_drones: int | None = None
         zones: dict[str, Zone] = {}
         connections: list[Connection] = []
-        connection_keys: set[frozenset[str]] = set()
+        seen_connections: set[frozenset[str]] = set()
         start_hub: str | None = None
         end_hub: str | None = None
 
@@ -66,24 +193,25 @@ class MapParser:
                     continue
 
                 if key in {"start_hub", "end_hub", "hub"}:
-                    zone = self._parse_zone(value, key, line_number)
+                    zone = self._parse_zone(key, value, line_number)
                     if zone.name in zones:
                         raise ValueError(
                             f"Line {line_number}: duplicate zone '{zone.name}'"
                         )
+                    zones[zone.name] = zone
+
                     if key == "start_hub":
                         if start_hub is not None:
                             raise ValueError(
-                                f"Line {line_number}: duplicate start_hub"
+                                f"Line {line_number}: duplicate 'start_hub'"
                             )
                         start_hub = zone.name
                     elif key == "end_hub":
                         if end_hub is not None:
                             raise ValueError(
-                                f"Line {line_number}: duplicate end_hub"
+                                f"Line {line_number}: duplicate 'end_hub'"
                             )
                         end_hub = zone.name
-                    zones[zone.name] = zone
                     continue
 
                 if key == "connection":
@@ -93,11 +221,11 @@ class MapParser:
                     pair = frozenset(
                         (connection.first_zone, connection.second_zone)
                     )
-                    if pair in connection_keys:
+                    if pair in seen_connections:
                         raise ValueError(
                             f"Line {line_number}: duplicate connection"
                         )
-                    connection_keys.add(pair)
+                    seen_connections.add(pair)
                     connections.append(connection)
                     continue
 
@@ -114,132 +242,39 @@ class MapParser:
 
         return ParsedMap(nb_drones, zones, connections, start_hub, end_hub)
 
-    @staticmethod
-    def _parse_zone(value: str, role: str, line_number: int) -> Zone:
-        definition, metadata = MapParser._parse_metadata(
-            value, {"zone", "color", "max_drones"}, line_number
-        )
-        fields = definition.split()
-        if len(fields) != 3:
-            raise ValueError(
-                f"Line {line_number}: zone needs a name and two coordinates"
-            )
-
-        name, x_text, y_text = fields
-        if "-" in name:
-            raise ValueError(
-                f"Line {line_number}: zone names cannot contain '-'"
-            )
-
-        zone_type = metadata.get("zone", "normal")
-        if zone_type not in {"normal", "blocked", "restricted", "priority"}:
-            raise ValueError(
-                f"Line {line_number}: invalid zone type '{zone_type}'"
-            )
-
-        max_drones = None
-        if role == "hub":
-            max_drones = MapParser._parse_int(
-                metadata.get("max_drones", "1"),
-                "max_drones",
-                line_number,
-                positive=True,
-            )
-
-        return Zone(
-            name,
-            MapParser._parse_int(x_text, "x", line_number),
-            MapParser._parse_int(y_text, "y", line_number),
-            zone_type,
-            metadata.get("color"),
-            max_drones,
-        )
-
-    @staticmethod
-    def _parse_connection(
-        value: str,
-        zones: dict[str, Zone],
-        line_number: int,
-    ) -> Connection:
-        definition, metadata = MapParser._parse_metadata(
-            value, {"max_link_capacity"}, line_number
-        )
-        endpoints = definition.split("-")
-        if len(endpoints) != 2 or any(not name for name in endpoints):
-            raise ValueError(
-                f"Line {line_number}: connection needs two zone names"
-            )
-
-        first_zone, second_zone = endpoints
-        if any(any(char.isspace() for char in name) for name in endpoints):
-            raise ValueError(
-                f"Line {line_number}: invalid zone name in connection"
-            )
-        for name in endpoints:
-            if name not in zones:
-                raise ValueError(
-                    f"Line {line_number}: undefined zone '{name}'"
-                )
-
-        capacity = MapParser._parse_int(
-            metadata.get("max_link_capacity", "1"),
-            "max_link_capacity",
-            line_number,
-            positive=True,
-        )
-        return Connection(first_zone, second_zone, capacity)
-
-    @staticmethod
-    def _parse_metadata(
-        value: str,
-        allowed_keys: set[str],
-        line_number: int,
-    ) -> tuple[str, dict[str, str]]:
-        definition, opening, remainder = value.partition("[")
-        if opening:
-            if (
-                not remainder.endswith("]")
-                or "[" in remainder
-                or "]" in remainder[:-1]
-            ):
-                raise ValueError(f"Line {line_number}: invalid metadata")
-            items = remainder[:-1].split()
-        else:
-            if "]" in value:
-                raise ValueError(f"Line {line_number}: invalid metadata")
-            items = []
-
-        metadata: dict[str, str] = {}
-        for item in items:
-            key, separator, field_value = item.partition("=")
-            if not separator or not key or not field_value:
-                raise ValueError(
-                    f"Line {line_number}: invalid metadata field '{item}'"
-                )
-            if key not in allowed_keys or key in metadata:
-                raise ValueError(
-                    f"Line {line_number}: invalid metadata key '{key}'"
-                )
-            metadata[key] = field_value
-
-        return definition.strip(), metadata
-
-    @staticmethod
-    def _parse_int(
-        value: str,
-        field: str,
-        line_number: int,
-        positive: bool = False,
-    ) -> int:
-        digits = value[1:] if value[:1] in {"+", "-"} else value
-        if not digits or not digits.isascii() or not digits.isdecimal():
-            raise ValueError(f"Line {line_number}: {field} must be an integer")
-
-        number = int(value)
-        if positive and number <= 0:
-            raise ValueError(f"Line {line_number}: {field} must be positive")
-        return number
-
 
 if __name__ == "__main__":
-    print("TEST")
+    print("1. Inteiro:")
+    print(MapParser._parse_int("4", "nb_drones", 1, positive=True))
+
+    print("\n2. Metadata:")
+    definition, metadata = MapParser._parse_metadata(
+        "junction 1 0 [color=yellow max_drones=2]",
+        2,
+    )
+    print(definition)
+    print(metadata)
+
+    print("\n3. Zona:")
+    start = MapParser._parse_zone("start_hub", "start 0 0", 3)
+    junction = MapParser._parse_zone(
+        "hub",
+        "junction 1 0 [color=yellow max_drones=2]",
+        4,
+    )
+    print(start)
+    print(junction)
+
+    print("\n4. Conexao:")
+    connection = MapParser._parse_connection(
+        "start-junction [max_link_capacity=2]",
+        {"start": start, "junction": junction},
+        5,
+    )
+    print(connection)
+
+    print("\n5. Arquivo completo:")
+    parsed_map = MapParser().parse_file(
+        pl.Path("maps/easy/01_linear_path.txt")
+    )
+    print(parsed_map)

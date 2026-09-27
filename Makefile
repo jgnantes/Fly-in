@@ -24,6 +24,6 @@ clean:
 debug: venv
 	@$(PYTHON) -m pdb main.py $(ARGS)
 
-lint: install
+lint: install-quiet
 	@$(VENV)/bin/flake8 .
 	@$(PYTHON) -m mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
