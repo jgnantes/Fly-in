@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Zone:
+    """ """
     name: str
     x: int
     y: int
@@ -13,6 +14,7 @@ class Zone:
 
 @dataclass
 class Connection:
+    """ """
     first_zone: str
     second_zone: str
     max_link_capacity: int
@@ -20,11 +22,20 @@ class Connection:
 
 @dataclass
 class ParsedMap:
+    """ """
     nb_drones: int
     zones: dict[str, Zone]
     connections: list[Connection]
     start_hub: str
     end_hub: str
+
+
+@dataclass
+class Drone:
+    """Store a drone's identity and current transit state."""
+    id: int
+    current_zone: str
+    in_transit_to: str | None = None
 
 
 if __name__ == "__main__":
@@ -37,8 +48,13 @@ if __name__ == "__main__":
     print(f"Zone 1: {zone1}")
     print(f"Zone 2: {zone2}\n")
     connection = Connection("zone1", "zone2", 2)
-    print(f"Connection test: {connection}\n")
+    print(f"Connection: {connection}\n")
     parsed_map = MapParser().parse_file(
         Path("maps/easy/01_linear_path.txt")
     )
     print(f"Parsed Map: {parsed_map}")
+    drone = Drone(1, "start")
+    print(f"Drone: {drone}")
+    print("\nRestricted Transit Test")
+    drone = Drone(1, "start", "restricted_tunnel")
+    print(f"Drone in transit: {drone}")

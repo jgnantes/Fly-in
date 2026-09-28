@@ -1,6 +1,6 @@
 from .models import Connection, Zone
 from .parser import ParsedMap
-from collections import deque
+from heapq import heappop, heappush
 
 
 class MapGraph:
@@ -36,29 +36,45 @@ class MapGraph:
 
         return neighbors
 
+    @staticmethod
+    def movement_cost(zone: Zone) -> int | None:
+        """Return the turns required to enter a zone."""
+        if zone.zone_type == "blocked":
+            return None
+        if zone.zone_type == "restricted":
+            return 2
+        return 1
+
     def find_path(self, start_zone: str, end_zone: str) -> list[str]:
-        """Find a shortest path that avoids blocked zones."""
+        """Find a path with the lowest zone-entry cost."""
         if start_zone not in self.zones:
             raise ValueError("Start zone does not exist")
         if end_zone not in self.zones:
             raise ValueError("End zone does not exist")
 
-        queue: deque[str] = deque([start_zone])
+        distances = {start_zone: 0}
         previous: dict[str, str | None] = {start_zone: None}
+        queue: list[tuple[int, str]] = [(0, start_zone)]
 
         while queue:
-            current_zone = queue.popleft()
+            current_cost, current_zone = heappop(queue)
+
+            if current_cost != distances[current_zone]:
+                continue
             if current_zone == end_zone:
                 break
 
             for neighbor, _ in self.get_neighbors(current_zone):
-                if (
-                    neighbor.zone_type == "blocked"
-                    or neighbor.name in previous
-                ):
+                move_cost = self.movement_cost(neighbor)
+                if move_cost is None:
                     continue
-                previous[neighbor.name] = current_zone
-                queue.append(neighbor.name)
+
+                new_cost = current_cost + move_cost
+                known_cost = distances.get(neighbor.name)
+                if known_cost is None or new_cost < known_cost:
+                    distances[neighbor.name] = new_cost
+                    previous[neighbor.name] = current_zone
+                    heappush(queue, (new_cost, neighbor.name))
 
         if end_zone not in previous:
             raise ValueError("No path exists between the zones")
@@ -79,10 +95,9 @@ if __name__ == "__main__":
 
     print("Neighbor test")
     graph = MapGraph(MapParser().parse_file(
-        Path("maps/easy/01_linear_path.txt")
+        Path("maps/medium/03_priority_puzzle.txt")
         )
     )
-
     for neighbor, connection in graph.get_neighbors("start"):
         print(
             f"Neighbor: {neighbor.name}; "
@@ -92,9 +107,15 @@ if __name__ == "__main__":
 
     print("Path Test")
     parsed_map = MapParser().parse_file(
-        Path("maps/easy/01_linear_path.txt")
+        Path("maps/medium/03_priority_puzzle.txt")
     )
     graph = MapGraph(parsed_map)
     path = graph.find_path(parsed_map.start_hub, parsed_map.end_hub)
+    print(f"Shortest path: {' -> '.join(path)}\n")
 
-    print(f"Shortest path: {' -> '.join(path)}")
+    print("Zone Movement Costs Test")
+    parsed_map = MapParser().parse_file(
+        Path("maps/medium/03_priority_puzzle.txt")
+    )
+    for zone in parsed_map.zones.values():
+        print(f"{zone.name}: {MapGraph.movement_cost(zone)}")
