@@ -39,10 +39,10 @@ def main() -> None:
     """Run the drone simulation for the selected map."""
     arg_parser = ArgumentParser()
     arg_parser.add_argument("map_file", type=Path)
-    args = arg_parser.parse_args()
+    arg = arg_parser.parse_args()
 
     try:
-        parsed_map = MapParser().parse_file(args.map_file)
+        parsed_map = MapParser().parse_file(arg.map_file)
         graph = MapGraph(parsed_map)
         simulator = Simulator(graph, parsed_map.nb_drones)
 

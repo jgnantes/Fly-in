@@ -6,4 +6,5 @@
 *.pytest_cache
 PLANO_DE_ESTUDOS.md
 maps
+.flake8
 *.vscode
