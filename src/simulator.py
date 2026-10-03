@@ -88,7 +88,9 @@ class Simulator:
         }
         expected_endpoints = {drone.current_zone, destination.name}
         if connection_endpoints != expected_endpoints:
-            raise ValueError("Connection does not link the drone and destination")
+            raise ValueError(
+                "Connection does not link the drone and destination"
+            )
 
         drone.in_transit_to = destination.name
         return (

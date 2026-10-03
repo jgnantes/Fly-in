@@ -80,10 +80,10 @@ class MapGraph:
             raise ValueError("No path exists between the zones")
 
         path: list[str] = []
-        current_zone: str | None = end_zone
-        while current_zone is not None:
-            path.append(current_zone)
-            current_zone = previous[current_zone]
+        current_zone_name: str | None = end_zone
+        while current_zone_name is not None:
+            path.append(current_zone_name)
+            current_zone_name = previous[current_zone_name]
 
         path.reverse()
         return path
